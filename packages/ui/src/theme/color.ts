@@ -117,7 +117,11 @@ export function fitOklch(oklch: OklchColor): OklchColor {
     c *= 0.9
     const next = { ...base, c }
     const out = oklchToRgb(next)
-    if (out.r >= 0 && out.r <= 1 && out.g >= 0 && out.g <= 1 && out.b >= 0 && out.b <= 1) {
+    const redInRange = out.r >= 0 && out.r <= 1
+    const greenInRange = out.g >= 0 && out.g <= 1
+    const blueInRange = out.b >= 0 && out.b <= 1
+
+    if (redInRange && greenInRange && blueInRange) {
       return next
     }
   }
