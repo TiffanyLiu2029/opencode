@@ -307,10 +307,15 @@ describe("tool.directory_summary", () => {
     Effect.gen(function* () {
       if (process.platform === "win32") return
       const directory = yield* write({
-        "packages/lib/package.json": JSON.stringify({ name: "@acme/lib", exports: { "./*": "./src/*.ts" } }),
+        "packages/lib/package.json": JSON.stringify({
+          name: "@acme/lib",
+          exports: { ".": { import: "./src/index.ts" }, "./*": "./src/*.ts" },
+        }),
+        "packages/lib/src/index.ts": "export const root = 1",
         "packages/lib/src/util.ts": "export const util = 1",
         "node_modules/left-pad/package.json": JSON.stringify({ name: "left-pad" }),
         "packages/app/index.ts": [
+          'import { root } from "@acme/lib"',
           'import { util } from "@acme/lib/util"',
           'import pad from "left-pad"',
           'import { Effect } from "effect"',
@@ -325,12 +330,20 @@ describe("tool.directory_summary", () => {
       expect(summary.dependencies).toEqual([
         {
           file: "index.ts",
+          specifier: "@acme/lib",
+          kind: "workspace",
+          target: "packages/lib/src/index.ts",
+          directory: "packages/lib/src",
+        },
+        {
+          file: "index.ts",
           specifier: "@acme/lib/util",
           kind: "workspace",
           target: "packages/lib/src/util.ts",
           directory: "packages/lib/src",
         },
       ])
+      expect(summary.relatedDirectories).toEqual([{ directory: "packages/lib/src", imports: 2, files: ["index.ts"] }])
       expect(summary.externalPackages).toEqual([
         { name: "effect", kind: "package", files: ["index.ts"] },
         { name: "left-pad", kind: "package", files: ["index.ts"] },
@@ -352,10 +365,187 @@ describe("tool.directory_summary", () => {
         "checks/b.test.ts": "",
         "container/alpha/index.ts": "",
         "container/beta/index.ts": "",
+        "pkg/package.json": "{}",
+        "pkg/index.ts": "",
+        "docs/guide.md": "",
+        "scripts/build.ts": "",
+        "assets/logo.svg": "",
       })
       expect((yield* summarize("mixed")).purpose).toContain("source module")
       expect((yield* summarize("checks")).purpose).toContain("automated tests")
       expect((yield* summarize("container")).purpose).toBe("Likely groups related modules or packages: alpha, beta.")
+      expect((yield* summarize("pkg")).purpose).toContain("package or project root")
+      expect((yield* summarize("docs")).purpose).toContain("project documentation")
+      expect((yield* summarize("scripts")).purpose).toContain("automation scripts")
+      expect((yield* summarize("assets")).purpose).toContain("no more specific purpose")
+    }),
+  )
+
+  it.instance("detects every supported import form and ignores comments, strings, and type-only imports", () =>
+    Effect.gen(function* () {
+      yield* write({
+        "shared/value.ts": "",
+        "shared/other.ts": "",
+        "shared/side.ts": "",
+        "shared/lazy.ts": "",
+        "shared/required.ts": "",
+        "types/only.ts": "export type T = string",
+        "module/view.tsx": [
+          '/* import block from "../fake/block" */',
+          'import type { T } from "../types/only"',
+          'import { value } from "../shared/value"',
+          'export { other } from "../shared/other"',
+          'import "../shared/side"',
+          'const lazy = () => import("../shared/lazy")',
+          'const text = `import template from "../fake/template"`',
+          "export const View = () => <div title='import jsx from \"../fake/jsx\"'>{value}</div>",
+        ].join("\n"),
+        "module/legacy.cjs": 'const required = require("../shared/required")',
+      })
+      const summary = yield* summarize("module")
+      expect(summary.dependencies.map((item) => [item.file, item.target])).toEqual([
+        ["legacy.cjs", "shared/required.ts"],
+        ["view.tsx", "shared/lazy.ts"],
+        ["view.tsx", "shared/other.ts"],
+        ["view.tsx", "shared/side.ts"],
+        ["view.tsx", "shared/value.ts"],
+      ])
+      expect(summary.relatedDirectories).toEqual([
+        { directory: "shared", imports: 5, files: ["legacy.cjs", "view.tsx"] },
+      ])
+      expect(summary.unresolvedImports).toEqual([])
+    }),
+  )
+
+  it.instance("skips sources whose imports cannot be parsed and still scans the rest", () =>
+    Effect.gen(function* () {
+      yield* write({
+        "shared/value.ts": "",
+        "module/broken.ts": 'import { from "../shared/value"',
+        "module/ok.ts": 'import "../shared/value"',
+      })
+      const summary = yield* summarize("module")
+      expect(summary.skipped).toEqual([{ file: "broken.ts", reason: "Imports could not be parsed" }])
+      expect(summary.dependencies.map((item) => item.file)).toEqual(["ok.ts"])
+    }),
+  )
+
+  it.instance("lists symlinked entries as skipped without following them", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+      const directory = yield* write({
+        "shared/value.ts": 'import "../elsewhere/value"',
+        "elsewhere/value.ts": "",
+        "module/index.ts": "",
+      })
+      const fs = yield* FSUtil.Service
+      yield* fs.symlink(path.join(directory, "shared", "value.ts"), path.join(directory, "module", "link.ts"))
+      const summary = yield* summarize("module")
+      expect(summary.files.map((file) => file.name)).toEqual(["index.ts"])
+      expect(summary.skipped).toEqual([{ file: "link.ts", reason: "Symbolic links are not scanned" }])
+      expect(summary.dependencies).toEqual([])
+    }),
+  )
+
+  it.instance("does not follow relative imports that leave the workspace", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const outside = yield* tmpdirScoped()
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(path.join(outside, "secret.ts"), "export const secret = 1")
+      const module = path.join(test.directory, "module")
+      const specifier = path.relative(module, path.join(outside, "secret")).split(path.sep).join("/")
+      yield* write({ "module/index.ts": `import { secret } from "${specifier}"` })
+      const requests: (readonly string[])[] = []
+      const summary: Summary = JSON.parse(
+        (yield* run("module", {
+          ...ctx,
+          ask: (request) =>
+            Effect.sync(() => {
+              requests.push(request.patterns)
+            }),
+        })).output,
+      )
+      expect(summary.dependencies).toEqual([])
+      expect(summary.relatedDirectories).toEqual([])
+      expect(summary.unresolvedImports).toEqual([{ file: "index.ts", specifier }])
+      expect(requests).toEqual([["module"], ["module/index.ts"]])
+    }),
+  )
+
+  it.instance("does not list or read anything when directory read permission is denied", () =>
+    Effect.gen(function* () {
+      yield* write({ "module/index.ts": "export const secret = 1" })
+      const requests: (readonly string[])[] = []
+      const exit = yield* run("module", {
+        ...ctx,
+        ask: (request) =>
+          Effect.sync(() => requests.push(request.patterns)).pipe(Effect.andThen(Effect.die(new Error("Read denied")))),
+      }).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(String(Cause.squash(exit.cause))).toContain("Read denied")
+      expect(requests).toEqual([["module"]])
+    }),
+  )
+
+  it.instance("rejects missing or malformed arguments before touching the filesystem", () =>
+    Effect.gen(function* () {
+      const info = yield* DirectorySummaryTool
+      const tool = yield* info.init()
+      const execute = tool.execute as unknown as (
+        args: unknown,
+        context: Tool.Context,
+      ) => ReturnType<typeof tool.execute>
+      for (const args of [{}, { path: "" }, { path: 42 }]) {
+        const exit = yield* execute(args, ctx).pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Tool.InvalidArgumentsError)
+      }
+    }),
+  )
+
+  it.instance("resolves package.json subpath imports and leaves unknown alias-like specifiers unresolved", () =>
+    Effect.gen(function* () {
+      yield* write({
+        "package.json": JSON.stringify({
+          name: "app",
+          imports: {
+            "#db": { bun: "./src/db/bun.ts", default: "./src/db/node.ts" },
+            "#util/*": "./src/util/*.ts",
+            "#local": "./src/feature/local.ts",
+            "#gone": "./src/gone.ts",
+          },
+        }),
+        "src/db/bun.ts": "",
+        "src/db/node.ts": "",
+        "src/util/format.ts": "",
+        "src/feature/local.ts": "",
+        "src/feature/index.ts": [
+          'import { db } from "#db"',
+          'import { format } from "#util/format"',
+          'import { local } from "#local"',
+          'import { gone } from "#gone"',
+          'import { nope } from "#nope"',
+          'import { value } from "@/no-alias"',
+        ].join("\n"),
+      })
+      const summary = yield* summarize("src/feature")
+      expect(summary.dependencies).toEqual([
+        { file: "index.ts", specifier: "#db", kind: "alias", target: "src/db/bun.ts", directory: "src/db" },
+        {
+          file: "index.ts",
+          specifier: "#util/format",
+          kind: "alias",
+          target: "src/util/format.ts",
+          directory: "src/util",
+        },
+      ])
+      expect(summary.unresolvedImports).toEqual([
+        { file: "index.ts", specifier: "#gone" },
+        { file: "index.ts", specifier: "#nope" },
+        { file: "index.ts", specifier: "@/no-alias" },
+      ])
+      expect(summary.externalPackages).toEqual([])
     }),
   )
 
