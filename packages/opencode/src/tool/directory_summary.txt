@@ -7,7 +7,7 @@ Returns JSON with these fields:
 - importantFiles: files whose role is not plain source
 - subdirectories: immediate subdirectories (not scanned recursively)
 - relatedDirectories: other repository directories this directory imports from, with import counts and the files that import them
-- dependencies: one record per (file, target) with the specifier used and its kind: relative, alias (tsconfig "paths", e.g. "@/"), or workspace (a monorepo package linked through node_modules)
+- dependencies: one record per (file, target) with the specifier used and its kind: relative, alias (tsconfig "paths" such as "@/", or package.json "imports" such as "#db"), or workspace (a monorepo package linked through node_modules)
 - externalPackages: third-party packages and runtime builtins that are imported
 - unresolvedImports: relative or alias imports whose target file could not be found
 - skipped and truncated: anything that was not scanned, so you know when coverage is incomplete

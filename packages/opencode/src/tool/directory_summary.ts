@@ -152,6 +152,19 @@ export const DirectorySummaryTool = Tool.define(
             return found
           })
 
+          // Read lazily so directories without "#" imports never request access to the package manifest.
+          const readManifest = yield* Effect.cached(
+            Effect.gen(function* () {
+              const manifest = (yield* fs
+                .findUp("package.json", directory, root)
+                .pipe(Effect.orElseSucceed(() => [] as string[])))[0]
+              if (!manifest) return undefined
+              yield* ask(manifest)
+              const pkg = yield* fs.readJson(manifest).pipe(Effect.orElseSucceed(() => undefined))
+              return { root: path.dirname(manifest), imports: isRecord(pkg) ? pkg.imports : undefined }
+            }),
+          )
+
           const resolveImport = Effect.fnUntraced(function* (specifier: string): Effect.fn.Return<Resolution> {
             if (/^\.\.?(?:\/|$)/.test(specifier)) {
               const target = yield* resolveModule(path.resolve(directory, specifier))
@@ -176,16 +189,26 @@ export const DirectorySummaryTool = Tool.define(
               }
               return { type: "unresolved" }
             }
+            // Node subpath imports (package.json "imports", e.g. "#db") always point inside the importing package.
+            if (specifier.startsWith("#")) {
+              const manifest = yield* readManifest
+              const entry = manifest && mapTarget(manifest.imports, specifier)
+              const target = entry ? yield* resolveModule(path.resolve(manifest.root, entry)) : undefined
+              if (!target) return { type: "unresolved" }
+              return { type: "dependency", kind: "alias", target, directory: path.dirname(target) }
+            }
             if (specifier.startsWith("node:") || specifier.startsWith("bun:") || specifier === "bun") {
               return { type: "external", kind: "builtin", name: specifier }
             }
             const parts = specifier.split("/")
+            // "@/foo" without a matching tsconfig alias is not a valid scoped package name.
+            if (specifier.startsWith("@") && (parts[0] === "@" || parts.length < 2)) return { type: "unresolved" }
             const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]
             if (builtinModules.includes(name)) return { type: "external", kind: "builtin", name }
             const pkg = yield* findPackage(name)
             if (!pkg) return { type: "external", kind: "package", name }
             const subpath = specifier.slice(name.length + 1)
-            const entry = exportTarget(pkg.exports, subpath)
+            const entry = mapTarget(pkg.exports, subpath ? `./${subpath}` : ".")
             const target = yield* resolveModule(entry ? path.resolve(pkg.root, entry) : path.join(pkg.root, subpath))
             if (!target) return { type: "dependency", kind: "workspace", target: pkg.root, directory: pkg.root }
             return { type: "dependency", kind: "workspace", target, directory: path.dirname(target) }
@@ -345,10 +368,10 @@ function purpose(name: string, files: { name: string; role: string }[], subdirec
   return "Groups project files and subdirectories; no more specific purpose can be inferred."
 }
 
-// Resolves the subset of package.json `exports` used by workspace packages: exact keys, one `*` pattern, and conditions.
-function exportTarget(exports: unknown, subpath: string): string | undefined {
-  const key = subpath ? `./${subpath}` : "."
-  const map = typeof exports === "string" ? { ".": exports } : exports
+// Resolves the subset of package.json `exports` and `imports` used in this repository: exact keys, one `*` pattern,
+// and conditions.
+function mapTarget(value: unknown, key: string): string | undefined {
+  const map = typeof value === "string" ? { ".": value } : value
   if (!isRecord(map)) return undefined
   if (key in map) return condition(map[key])
   const pattern = Object.keys(map).find((item) => {
