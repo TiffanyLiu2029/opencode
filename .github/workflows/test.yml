@@ -59,8 +59,8 @@ jobs:
 
       - name: Run directory_summary properties
         working-directory: packages/opencode
-        timeout-minutes: 2
-        run: bun test --timeout 30000 test/tool/directory_summary.property.test.ts
+        timeout-minutes: 5
+        run: bun test --timeout 60000 test/tool/directory_summary.property.test.ts
 
       - name: Run unit tests
         timeout-minutes: 10

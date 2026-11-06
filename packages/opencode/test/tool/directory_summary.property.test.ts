@@ -106,7 +106,7 @@ describe("tool.directory_summary properties", () => {
           }),
         ),
       ),
-    30000,
+    60000,
   )
 
   // P2: Count each distinct (source file, target) once and aggregate counts and source files by related directory.
@@ -151,7 +151,7 @@ describe("tool.directory_summary properties", () => {
           }),
         ),
       ),
-    30000,
+    60000,
   )
 
   // P3: Exclude imports within the summarized directory and do not scan nested source files.
@@ -185,7 +185,7 @@ describe("tool.directory_summary properties", () => {
           }),
         ),
       ),
-    30000,
+    60000,
   )
 
   // P4: Report third-party packages and runtime builtins separately from repository dependencies, with unique importing files.
@@ -229,7 +229,7 @@ describe("tool.directory_summary properties", () => {
             }),
           ),
       ),
-    30000,
+    60000,
   )
 })
 
@@ -258,7 +258,7 @@ it.live(
         }),
       ),
     ),
-  30000,
+  60000,
 )
 
 // R3: Return a filename-based purpose overview in one or two sentences, separate from detailed file and dependency lists.
@@ -289,7 +289,7 @@ it.live(
         }),
       ),
     ),
-  30000,
+  60000,
 )
 
 // R4: Fail a summary request for a missing or deleted directory with an explicit Directory not found error identifying its path.
@@ -319,7 +319,7 @@ it.live(
         }),
       ),
     ),
-  30000,
+  60000,
 )
 
 // R5: Recompute the immediate file listing on every call so added files appear and removed files disappear.
@@ -348,7 +348,7 @@ it.live(
         }),
       ),
     ),
-  30000,
+  60000,
 )
 
 // R6: For a directory rename that preserves its filename-based purpose category and entry-point naming relationships, preserve purpose and file roles; update reported paths to the new directory name.
@@ -387,5 +387,5 @@ it.live(
         }),
       ),
     ),
-  30000,
+  60000,
 )

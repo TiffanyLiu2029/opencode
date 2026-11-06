@@ -63,3 +63,5 @@ The checked-out repository is TiffanyLiu2029/opencode, a personal fork of CMU-31
 ## Remote CI triage
 
 The first PR test workflow failed while installing Chromium: `Playwright does not support chromium on ubuntu26.04-x64`. No browser tests executed in that run. Pin the e2e job to supported `ubuntu-24.04` instead of the moving `ubuntu-latest` runner. This is a CI environment compatibility correction, not a feature defect or weakened test.
+
+The superseded CI property step showed P1–P4 and R2–R4 passing, but seven properties already took approximately 108 seconds on the hosted runner (P3 alone 27.55 seconds). Increase the dedicated step budget to five minutes and each property budget to 60 seconds to accommodate observed hosted filesystem overhead while retaining 100 cases and every assertion.
