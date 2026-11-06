@@ -59,3 +59,7 @@ R4 also initially exposed a fixture cleanup error: the deleted-directory case mi
 ## Repository and PR scope
 
 The checked-out repository is TiffanyLiu2029/opencode, a personal fork of CMU-313/opencode. GitHub metadata and origin/HEAD both identify `main` as this fork's default branch. No separate team repository was supplied. The assignment PR therefore targets this fork's `main`; it includes the existing Project 3 feature commits as well as Project 4. All three specified Project 3 commits remain ancestors. The fork lists only Tiffany as a collaborator, so no teammate reviewer can be identified automatically. The PR must remain unmerged for Project 5.
+
+## Remote CI triage
+
+The first PR test workflow failed while installing Chromium: `Playwright does not support chromium on ubuntu26.04-x64`. No browser tests executed in that run. Pin the e2e job to supported `ubuntu-24.04` instead of the moving `ubuntu-latest` runner. This is a CI environment compatibility correction, not a feature defect or weakened test.
